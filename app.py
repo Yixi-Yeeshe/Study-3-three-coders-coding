@@ -107,31 +107,41 @@ def read_raw_data(raw_ws):
         if col not in df.columns:
             df[col] = ""
 
-    return df[required_cols]
+    df = df[required_cols]
+    df = df.fillna("")
+
+    return df
 
 
 def write_raw_data(raw_ws, df):
     raw_ws.clear()
 
+    header = [
+        "coder_id",
+        "item_id",
+        "question",
+        "answer",
+        "comment",
+        "updated_at"
+    ]
+
     if df.empty:
-        raw_ws.update([[
-            "coder_id",
-            "item_id",
-            "question",
-            "answer",
-            "comment",
-            "updated_at"
-        ]])
+        raw_ws.update([header])
     else:
+        df = df.fillna("")
         raw_ws.update(
             [df.columns.tolist()] + df.astype(str).values.tolist()
         )
 
 
 def update_kappa_format(kappa_ws, df):
+    kappa_ws.clear()
+
     if df.empty:
-        kappa_ws.clear()
+        kappa_ws.update([["item_id", "question"]])
         return
+
+    df = df.fillna("")
 
     wide = df.pivot_table(
         index=["item_id", "question"],
@@ -141,10 +151,10 @@ def update_kappa_format(kappa_ws, df):
     ).reset_index()
 
     wide.columns.name = None
+    wide = wide.fillna("")
     wide["item_id"] = wide["item_id"].astype(int)
     wide = wide.sort_values("item_id")
 
-    kappa_ws.clear()
     kappa_ws.update(
         [wide.columns.tolist()] + wide.astype(str).values.tolist()
     )
@@ -168,6 +178,7 @@ def save_response(raw_ws, kappa_ws, df, coder_id, item_id, question, answer, com
         df = df[~mask]
 
     df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    df = df.fillna("")
     df["item_id"] = df["item_id"].astype(int)
     df = df.sort_values(["item_id", "coder_id"])
 
@@ -193,11 +204,9 @@ if not coder:
     st.stop()
 
 coder = coder.strip().lower()
+
 st.write(f"Current coder: **{coder}**")
-
 st.info("每完成一题请点击保存。下次输入同一个 coder ID，会自动回到你上次停止的位置。")
-
-questions_df = pd.DataFrame(QUESTIONS)
 
 # Completed items for this coder
 coder_df = df[df["coder_id"].astype(str) == coder]
@@ -218,8 +227,8 @@ if "current_coder" not in st.session_state or st.session_state.current_coder != 
     st.session_state.current_coder = coder
 
     first_incomplete_index = 0
-    for i, q in enumerate(QUESTIONS):
-        if q["item_id"] not in completed_ids:
+    for i, q_item in enumerate(QUESTIONS):
+        if q_item["item_id"] not in completed_ids:
             first_incomplete_index = i
             break
 

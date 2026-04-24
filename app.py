@@ -4,27 +4,13 @@ from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 
-# ========= 配置 =========
+# ===== 配置 =====
 RAW_SHEET = "raw_data"
 KAPPA_SHEET = "kappa_format"
 
 QUESTIONS = [
-    {
-        "item_id": 1,
-        "question": '''问题1
-
-"没错，自从来到澳洲，不管男女老少，不管身材如何，都逃不过澳洲的“变胖诅咒”…"
-
-P1：“脸在屏幕上越来越看不全” 属于（）'''
-    },
-    {
-        "item_id": 2,
-        "question": '''问题2
-
-"来到澳洲以后，很多人控制不住地“肿了”…"
-
-P2：“肿了” 属于（）'''
-    }
+    {"item_id": 1, "question": "P1：“脸在屏幕上越来越看不全” 属于（）"},
+    {"item_id": 2, "question": "P2：“肿了” 属于（）"}
 ]
 
 OPTIONS = [
@@ -37,7 +23,7 @@ OPTIONS = [
     "19. 不确定","20. 其他"
 ]
 
-# ========= 连接 Google Sheets =========
+# ===== 连接 Google Sheets =====
 @st.cache_resource
 def connect_sheet():
     scopes = [
@@ -49,8 +35,8 @@ def connect_sheet():
         scopes=scopes
     )
     client = gspread.authorize(creds)
-    sheet = client.open(st.secrets["spreadsheet_name"])
-    return sheet
+    return client.open(st.secrets["spreadsheet_name"])
+
 
 def get_ws(sheet, name):
     try:
@@ -58,30 +44,43 @@ def get_ws(sheet, name):
     except:
         return sheet.add_worksheet(title=name, rows=1000, cols=20)
 
+
 def read_data(ws):
     data = ws.get_all_records()
     if not data:
         return pd.DataFrame(columns=["coder_id","item_id","question","answer","comment","time"])
     return pd.DataFrame(data)
 
+
 def write_data(ws, df):
     ws.clear()
     ws.update([df.columns.tolist()] + df.astype(str).values.tolist())
 
+
 def update_kappa(ws, df):
     if df.empty:
         return
+
+    df = df.copy()
+    df["item_id"] = pd.to_numeric(df["item_id"], errors="coerce")
+    df = df.dropna(subset=["item_id"])
+    df["item_id"] = df["item_id"].astype(int)
+
     wide = df.pivot_table(
         index=["item_id","question"],
         columns="coder_id",
         values="answer",
         aggfunc="first"
     ).reset_index()
+
     wide.columns.name = None
+    wide = wide.sort_values("item_id")
+
     ws.clear()
     ws.update([wide.columns.tolist()] + wide.astype(str).values.tolist())
 
-# ========= UI =========
+
+# ===== UI =====
 st.set_page_config(layout="wide")
 st.title("Study 3 Coding")
 
@@ -132,8 +131,10 @@ else:
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
 
+            # 覆盖旧答案
             df = df[~((df["coder_id"]==coder)&(df["item_id"]==q["item_id"]))]
-            df = pd.concat([df, pd.DataFrame([new])])
+
+            df = pd.concat([df, pd.DataFrame([new])], ignore_index=True)
 
             write_data(raw_ws, df)
             update_kappa(kappa_ws, df)

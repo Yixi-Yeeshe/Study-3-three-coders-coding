@@ -59,15 +59,20 @@ def write_data(ws, df):
 
 def update_kappa(ws, df):
     if df.empty:
+        ws.clear()
         return
 
     df = df.copy()
+
     df["item_id"] = pd.to_numeric(df["item_id"], errors="coerce")
     df = df.dropna(subset=["item_id"])
     df["item_id"] = df["item_id"].astype(int)
 
+    # 清理空值，避免 Google Sheets API 报 InvalidJSONError
+    df = df.fillna("")
+
     wide = df.pivot_table(
-        index=["item_id","question"],
+        index=["item_id", "question"],
         columns="coder_id",
         values="answer",
         aggfunc="first"
@@ -75,6 +80,9 @@ def update_kappa(ws, df):
 
     wide.columns.name = None
     wide = wide.sort_values("item_id")
+
+    # pivot 后未完成的 coder 会产生 NaN，这里转成空白
+    wide = wide.fillna("")
 
     ws.clear()
     ws.update([wide.columns.tolist()] + wide.astype(str).values.tolist())

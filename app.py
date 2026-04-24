@@ -113,7 +113,7 @@ else:
 
     selected = None
     for i, col in enumerate(cols):
-        choice = col.radio("", groups[i], key=f"{q['item_id']}_{i}")
+        choice = col.radio("", groups[i], index=None, key=f"{q['item_id']}_{i}")
         if choice:
             selected = choice
 

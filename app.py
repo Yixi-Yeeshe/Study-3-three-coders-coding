@@ -12,7 +12,7 @@ QUESTIONS = [
         "item_id": 1,
         "question": '''问题1
 
-"sentence没错，自从来到澳洲，不管男女老少，不管身材如何，都逃不过澳洲的“变胖诅咒”……来澳洲前从不怎么注意自己的体重，因为基本没什么大变化。而来澳洲后，每日三省吾身，为什么我的脸在屏幕上越来越看不全了。"
+"没错，自从来到澳洲，不管男女老少，不管身材如何，都逃不过澳洲的“变胖诅咒”……来澳洲前从不怎么注意自己的体重，因为基本没什么大变化。而来澳洲后，每日三省吾身，为什么我的脸在屏幕上越来越看不全了。"
 
 P1：“脸在屏幕上越来越看不全” 属于（）'''
     },
@@ -22,7 +22,7 @@ P1：“脸在屏幕上越来越看不全” 属于（）'''
 
 "来到澳洲以后，很多人控制不住地“肿了”。澳洲仿佛有一种魔力，很多人来到这里，慢慢地就会控制不住胖了。"
 
-P2：“肿了” 属于code as（）'''
+P2：“肿了” 属于（）'''
     }
 ]
 
@@ -206,6 +206,9 @@ if not coder:
 
 coder = coder.strip().lower()
 
+if "finished" not in st.session_state:
+    st.session_state.finished = False
+
 st.write(f"Current coder: {coder}")
 st.info("每完成一题请点击保存。下次输入同一个 coder ID，会自动回到你上次停止的位置。")
 
@@ -228,17 +231,29 @@ st.write(f"进度：{done}/{total}")
 # Set starting question: first incomplete question
 if "current_coder" not in st.session_state or st.session_state.current_coder != coder:
     st.session_state.current_coder = coder
+    st.session_state.finished = False
 
     first_incomplete_index = 0
+    all_completed = True
+
     for i, q_item in enumerate(QUESTIONS):
         if q_item["item_id"] not in completed_ids:
             first_incomplete_index = i
+            all_completed = False
             break
 
     st.session_state.current_index = first_incomplete_index
 
+    if all_completed:
+        st.session_state.finished = True
+
 if "current_index" not in st.session_state:
     st.session_state.current_index = 0
+
+if st.session_state.finished:
+    st.success("所有题目已经完成。谢谢你的参与！")
+    st.balloons()
+    st.stop()
 
 idx = st.session_state.current_index
 idx = max(0, min(idx, len(QUESTIONS) - 1))
@@ -324,11 +339,14 @@ with save_col:
 
             if st.session_state.current_index < len(QUESTIONS) - 1:
                 st.session_state.current_index += 1
+            else:
+                st.session_state.finished = True
 
             st.rerun()
 
 with prev_col:
     if st.button("⬅️ 上一题"):
+        st.session_state.finished = False
         if st.session_state.current_index > 0:
             st.session_state.current_index -= 1
             st.rerun()
@@ -338,6 +356,8 @@ with next_col:
         if st.session_state.current_index < len(QUESTIONS) - 1:
             st.session_state.current_index += 1
             st.rerun()
+        else:
+            st.info("已经是最后一题。请点击“保存当前题”完成。")
 
 st.divider()
 st.subheader("Google Sheets 状态")

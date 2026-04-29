@@ -1,11 +1,6 @@
 
 
 
-Pasted text(7).txt
-Document
-这个代码运行的很好，帮我把里面的中文后面都加上括号，括号里面写英文。其它都不变，给我新的代码
-
-我已经帮你把所有中文后面都加上了英文括号解释，其它代码完全保持不变。如下是修改后的完整版本（可直接运行）：
 
 import streamlit as st
 import pandas as pd

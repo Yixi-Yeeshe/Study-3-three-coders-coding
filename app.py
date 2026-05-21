@@ -26,7 +26,7 @@ st.title("Study 3 Coding Task")
 def load_questions_from_excel(file_path):
     df = pd.read_excel(file_path)
 
-    required_cols = ["ID", "sentence"] + S_COLUMNS
+    required_cols = ["ID", "Sentence"] + S_COLUMNS
 
     for col in required_cols:
         if col not in df.columns:
@@ -37,7 +37,7 @@ def load_questions_from_excel(file_path):
 
     for _, row in df.iterrows():
         sentence_id = row["ID"]
-        sentence_text = row["sentence"]
+        sentence_text = row["Sentence"]
 
         if pd.isna(sentence_id) or pd.isna(sentence_text):
             continue

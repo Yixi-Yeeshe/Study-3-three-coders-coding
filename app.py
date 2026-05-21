@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 RAW_SHEET = "raw_data"
 KAPPA_SHEET = "kappa_format"
 
-EXCEL_PATH = "用于app数据.xlsx"
+DATA_PATH = "用于app数据.csv"
 
 OPTIONS = [
     "A. 肥胖外观描述 obesity appearance",

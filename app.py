@@ -7,50 +7,60 @@ from google.oauth2.service_account import Credentials
 RAW_SHEET = "raw_data"
 KAPPA_SHEET = "kappa_format"
 
-QUESTIONS = [
-    {
-        "item_id": 1,
-        "question": '''问题1
-
-"没错，自从来到澳洲，不管男女老少，不管身材如何，都逃不过澳洲的“变胖诅咒”……来澳洲前从不怎么注意自己的体重，因为基本没什么大变化。而来澳洲后，每日三省吾身，为什么我的脸在屏幕上越来越看不全了。"
-
-P1：“脸在屏幕上越来越看不全” 属于（）'''
-    },
-    {
-        "item_id": 2,
-        "question": '''问题2
-
-"来到澳洲以后，很多人控制不住地“肿了”。澳洲仿佛有一种魔力，很多人来到这里，慢慢地就会控制不住胖了。"
-
-P2：“肿了” 属于（）'''
-    }
-]
+EXCEL_PATH = r"\\ad.monash.edu\home\User091\ywan0583\Desktop\Study 3\正文话语分析\用于app里面的10%数据.xlsx"
 
 OPTIONS = [
-    "1. 全身比例型描述whole-body proportion description",
-    "2. 全身与他人做比较描述",
-    "3. 局部身体描述specific body part description",
-    "4. 面部/脸部描述",
-    "5. 发福/变胖描述",
-    "6. 体型大小描述",
-    "7. 身材变化描述",
-    "8. 否定式肥胖描述",
-    "9. 委婉/中性描述",
-    "10. 负面评价描述",
-    "11. 夸张/戏剧化描述",
-    "12. 隐喻/比喻描述",
-    "13. 动物化/物化描述",
-    "14. 年龄化描述",
-    "15. 性别化描述",
-    "16. 健康风险描述",
-    "17. 医学/疾病描述",
-    "18. 审美/外貌描述",
-    "19. 不确定",
-    "20. 其他"
+    "A. 肥胖外观描述 obesity appearance",
+    "B. 肥胖原因描述 obesity causes",
+    "C. 肥胖发展描述 fatness development",
+    "D. 肥胖结果描述 obesity consequences"
 ]
+
+S_COLUMNS = [f"S{i}" for i in range(1, 9)]
 
 st.set_page_config(page_title="Study 3 Coding", layout="wide")
 st.title("Study 3 Coding Task")
+
+
+@st.cache_data
+def load_questions_from_excel(file_path):
+    df = pd.read_excel(file_path)
+
+    required_cols = ["ID", "sentence"] + S_COLUMNS
+
+    for col in required_cols:
+        if col not in df.columns:
+            st.error(f"Excel 文件缺少必要列：{col}")
+            st.stop()
+
+    pages = []
+
+    for _, row in df.iterrows():
+        sentence_id = row["ID"]
+        sentence_text = row["sentence"]
+
+        if pd.isna(sentence_id) or pd.isna(sentence_text):
+            continue
+
+        sub_questions = []
+
+        for s_col in S_COLUMNS:
+            value = row[s_col]
+
+            if pd.notna(value) and str(value).strip() != "":
+                sub_questions.append({
+                    "s_col": s_col,
+                    "text": str(value).strip()
+                })
+
+        if len(sub_questions) > 0:
+            pages.append({
+                "sentence_id": str(sentence_id).strip(),
+                "sentence": str(sentence_text).strip(),
+                "sub_questions": sub_questions
+            })
+
+    return pages
 
 
 @st.cache_resource
@@ -80,28 +90,21 @@ def get_or_create_ws(sheet, name, rows=1000, cols=50):
 def read_raw_data(raw_ws):
     records = raw_ws.get_all_records()
 
-    if not records:
-        return pd.DataFrame(
-            columns=[
-                "coder_id",
-                "item_id",
-                "question",
-                "answer",
-                "comment",
-                "updated_at"
-            ]
-        )
-
-    df = pd.DataFrame(records)
-
     required_cols = [
         "coder_id",
-        "item_id",
+        "sentence_id",
+        "s_col",
+        "sentence",
         "question",
         "answer",
         "comment",
         "updated_at"
     ]
+
+    if not records:
+        return pd.DataFrame(columns=required_cols)
+
+    df = pd.DataFrame(records)
 
     for col in required_cols:
         if col not in df.columns:
@@ -118,7 +121,9 @@ def write_raw_data(raw_ws, df):
 
     header = [
         "coder_id",
-        "item_id",
+        "sentence_id",
+        "s_col",
+        "sentence",
         "question",
         "answer",
         "comment",
@@ -138,13 +143,13 @@ def update_kappa_format(kappa_ws, df):
     kappa_ws.clear()
 
     if df.empty:
-        kappa_ws.update([["item_id", "question"]])
+        kappa_ws.update([["sentence_id", "s_col", "question"]])
         return
 
     df = df.fillna("")
 
     wide = df.pivot_table(
-        index=["item_id", "question"],
+        index=["sentence_id", "s_col", "question"],
         columns="coder_id",
         values="answer",
         aggfunc="first"
@@ -152,38 +157,59 @@ def update_kappa_format(kappa_ws, df):
 
     wide.columns.name = None
     wide = wide.fillna("")
-    wide["item_id"] = wide["item_id"].astype(int)
-    wide = wide.sort_values("item_id")
+    wide = wide.sort_values(["sentence_id", "s_col"])
 
     kappa_ws.update(
         [wide.columns.tolist()] + wide.astype(str).values.tolist()
     )
 
 
-def save_response(raw_ws, kappa_ws, df, coder_id, item_id, question, answer, comment):
-    new_row = {
-        "coder_id": coder_id,
-        "item_id": item_id,
-        "question": question,
-        "answer": answer,
-        "comment": comment,
-        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
+def save_page_responses(
+    raw_ws,
+    kappa_ws,
+    df,
+    coder_id,
+    sentence_id,
+    sentence,
+    responses,
+    comment
+):
+    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if not df.empty:
         mask = (
             (df["coder_id"].astype(str) == str(coder_id)) &
-            (df["item_id"].astype(str) == str(item_id))
+            (df["sentence_id"].astype(str) == str(sentence_id))
         )
         df = df[~mask]
 
-    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    new_rows = []
+
+    for item in responses:
+        new_rows.append({
+            "coder_id": coder_id,
+            "sentence_id": sentence_id,
+            "s_col": item["s_col"],
+            "sentence": sentence,
+            "question": item["question"],
+            "answer": item["answer"],
+            "comment": comment,
+            "updated_at": updated_at
+        })
+
+    df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     df = df.fillna("")
-    df["item_id"] = df["item_id"].astype(int)
-    df = df.sort_values(["item_id", "coder_id"])
+    df = df.sort_values(["sentence_id", "s_col", "coder_id"])
 
     write_raw_data(raw_ws, df)
     update_kappa_format(kappa_ws, df)
+
+
+PAGES = load_questions_from_excel(EXCEL_PATH)
+
+if len(PAGES) == 0:
+    st.error("Excel 中没有可用题目。请检查 ID、sentence、S1-S8 是否有内容。")
+    st.stop()
 
 
 sheet = connect_sheet()
@@ -208,18 +234,18 @@ if "finished" not in st.session_state:
     st.session_state.finished = False
 
 st.write(f"Current coder: {coder}")
-st.info("点击“下一题”会自动保存答案。下次输入同一个 coder ID，会自动回到你上次停止的位置。")
+st.info("点击“下一题”会自动保存本页所有答案。下次输入同一个 coder ID，会自动回到你上次停止的位置。")
 
 
 coder_df = df[df["coder_id"].astype(str) == coder]
 
 if not coder_df.empty:
-    completed_ids = set(coder_df["item_id"].astype(int).tolist())
+    completed_sentence_ids = set(coder_df["sentence_id"].astype(str).tolist())
 else:
-    completed_ids = set()
+    completed_sentence_ids = set()
 
-total = len(QUESTIONS)
-done = len(completed_ids)
+total = len(PAGES)
+done = len(completed_sentence_ids)
 
 st.progress(done / total)
 st.write(f"进度：{done}/{total}")
@@ -232,8 +258,8 @@ if "current_coder" not in st.session_state or st.session_state.current_coder != 
     first_incomplete_index = 0
     all_completed = True
 
-    for i, q_item in enumerate(QUESTIONS):
-        if q_item["item_id"] not in completed_ids:
+    for i, page in enumerate(PAGES):
+        if page["sentence_id"] not in completed_sentence_ids:
             first_incomplete_index = i
             all_completed = False
             break
@@ -251,63 +277,74 @@ if st.session_state.finished:
     st.balloons()
     st.stop()
 
+
 idx = st.session_state.current_index
-idx = max(0, min(idx, len(QUESTIONS) - 1))
+idx = max(0, min(idx, len(PAGES) - 1))
 st.session_state.current_index = idx
 
-q = QUESTIONS[idx]
-item_id = int(q["item_id"])
-question_text = q["question"]
+page = PAGES[idx]
+
+sentence_id = page["sentence_id"]
+sentence = page["sentence"]
+sub_questions = page["sub_questions"]
 
 st.divider()
-st.subheader(f"Question {idx + 1} of {total}")
-st.write(question_text)
+st.subheader(f"Sentence {idx + 1} of {total}")
+st.write(f"**ID:** {sentence_id}")
+
+st.markdown("### 原句")
+st.write(sentence)
+
+st.markdown("### 请判断下面每个片段属于哪个选项")
 
 
-existing_answer = df[
+existing_page_answers = df[
     (df["coder_id"].astype(str) == coder) &
-    (df["item_id"].astype(str) == str(item_id))
+    (df["sentence_id"].astype(str) == str(sentence_id))
 ]
 
-default_answer = None
-default_comment = ""
+existing_answer_dict = {}
 
-if not existing_answer.empty:
-    default_answer = existing_answer.iloc[0]["answer"]
-    default_comment = existing_answer.iloc[0]["comment"]
+for _, row in existing_page_answers.iterrows():
+    existing_answer_dict[str(row["s_col"])] = str(row["answer"])
 
-st.write("请选择一个选项：")
+responses = []
 
-option_groups = [OPTIONS[i::3] for i in range(3)]
-cols = st.columns(3)
+for sub_q in sub_questions:
+    s_col = sub_q["s_col"]
+    q_text = sub_q["text"]
 
-answers = []
+    st.divider()
+    st.markdown(f"#### {s_col}")
 
-for i, col in enumerate(cols):
-    group = option_groups[i]
+    full_question = f"{q_text} 属于下面哪个选项？"
+    st.write(full_question)
 
-    if default_answer in group:
-        default_index = group.index(default_answer)
+    default_answer = existing_answer_dict.get(s_col, None)
+
+    if default_answer in OPTIONS:
+        default_index = OPTIONS.index(default_answer)
     else:
         default_index = None
 
-    ans = col.radio(
-        label=f"选项列 {i + 1}",
-        options=group,
+    answer = st.radio(
+        label=f"{s_col}_answer",
+        options=OPTIONS,
         index=default_index,
-        key=f"{coder}_{item_id}_group_{i}",
+        key=f"{coder}_{sentence_id}_{s_col}",
         label_visibility="collapsed"
     )
 
-    if ans is not None:
-        answers.append(ans)
+    responses.append({
+        "s_col": s_col,
+        "question": full_question,
+        "answer": answer
+    })
 
-selected_unique = list(dict.fromkeys(answers))
 
 comment = st.text_area(
-    "备注（可选）：",
-    value=default_comment,
-    key=f"{coder}_{item_id}_comment"
+    "本页备注（可选）：",
+    key=f"{coder}_{sentence_id}_comment"
 )
 
 
@@ -321,26 +358,30 @@ with prev_col:
             st.rerun()
 
 with next_col:
-    button_label = "完成" if st.session_state.current_index == len(QUESTIONS) - 1 else "下一题 ➡️"
+    button_label = "完成" if st.session_state.current_index == len(PAGES) - 1 else "下一题 ➡️"
 
     if st.button(button_label):
-        if len(selected_unique) == 0:
-            st.warning("请先选择一个选项。")
-        elif len(selected_unique) > 1:
-            st.warning("你选择了多个选项。请只保留一个。")
+        missing = [
+            item["s_col"]
+            for item in responses
+            if item["answer"] is None
+        ]
+
+        if len(missing) > 0:
+            st.warning(f"请先完成这些问题：{', '.join(missing)}")
         else:
-            save_response(
+            save_page_responses(
                 raw_ws=raw_ws,
                 kappa_ws=kappa_ws,
                 df=df,
                 coder_id=coder,
-                item_id=item_id,
-                question=question_text,
-                answer=selected_unique[0],
+                sentence_id=sentence_id,
+                sentence=sentence,
+                responses=responses,
                 comment=comment
             )
 
-            if st.session_state.current_index < len(QUESTIONS) - 1:
+            if st.session_state.current_index < len(PAGES) - 1:
                 st.session_state.current_index += 1
             else:
                 st.session_state.finished = True
@@ -352,5 +393,5 @@ st.divider()
 st.subheader("Google Sheets 状态")
 
 st.write("答案会自动保存到 Google Sheets。")
-st.write("raw_data = 原始长表")
-st.write("kappa_format = 可用于计算 kappa 的宽表")
+st.write("raw_data = 原始长表，每一行是一个 coder 对一个 S 片段的判断。")
+st.write("kappa_format = 可用于计算 kappa 的宽表。")

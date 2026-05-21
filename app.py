@@ -23,8 +23,8 @@ st.title("Study 3 Coding Task")
 
 
 @st.cache_data
-def load_questions_from_excel(file_path):
-    df = pd.read_excel(file_path)
+def load_questions_from_csv(file_path):
+    df = pd.read_csv(file_path)
 
     required_cols = ["ID", "Sentence"] + S_COLUMNS
 
@@ -205,7 +205,7 @@ def save_page_responses(
     update_kappa_format(kappa_ws, df)
 
 
-PAGES = load_questions_from_excel(EXCEL_PATH)
+PAGES = load_questions_from_csv(DATA_PATH)
 
 if len(PAGES) == 0:
     st.error("Excel 中没有可用题目。请检查 ID、sentence、S1-S8 是否有内容。")

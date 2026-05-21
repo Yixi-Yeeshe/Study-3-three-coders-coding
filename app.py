@@ -186,7 +186,6 @@ def save_response(raw_ws, kappa_ws, df, coder_id, item_id, question, answer, com
     update_kappa_format(kappa_ws, df)
 
 
-# Connect to Google Sheets
 sheet = connect_sheet()
 raw_ws = get_or_create_ws(sheet, RAW_SHEET)
 kappa_ws = get_or_create_ws(sheet, KAPPA_SHEET)
@@ -194,7 +193,6 @@ kappa_ws = get_or_create_ws(sheet, KAPPA_SHEET)
 df = read_raw_data(raw_ws)
 
 
-# Coder ID
 coder = st.text_input(
     "请输入你的 coder ID：",
     placeholder="例如 CoderA / CoderB / CoderC"
@@ -210,10 +208,9 @@ if "finished" not in st.session_state:
     st.session_state.finished = False
 
 st.write(f"Current coder: {coder}")
-st.info("每完成一题请点击保存。下次输入同一个 coder ID，会自动回到你上次停止的位置。")
+st.info("点击“下一题”会自动保存答案。下次输入同一个 coder ID，会自动回到你上次停止的位置。")
 
 
-# Completed items for this coder
 coder_df = df[df["coder_id"].astype(str) == coder]
 
 if not coder_df.empty:
@@ -228,7 +225,6 @@ st.progress(done / total)
 st.write(f"进度：{done}/{total}")
 
 
-# Set starting question: first incomplete question
 if "current_coder" not in st.session_state or st.session_state.current_coder != coder:
     st.session_state.current_coder = coder
     st.session_state.finished = False
@@ -268,7 +264,6 @@ st.subheader(f"Question {idx + 1} of {total}")
 st.write(question_text)
 
 
-# Existing answer
 existing_answer = df[
     (df["coder_id"].astype(str) == coder) &
     (df["item_id"].astype(str) == str(item_id))
@@ -315,10 +310,20 @@ comment = st.text_area(
     key=f"{coder}_{item_id}_comment"
 )
 
-save_col, prev_col, next_col = st.columns([2, 1, 1])
 
-with save_col:
-    if st.button("保存当前题"):
+prev_col, next_col = st.columns([1, 1])
+
+with prev_col:
+    if st.button("⬅️ 上一题"):
+        st.session_state.finished = False
+        if st.session_state.current_index > 0:
+            st.session_state.current_index -= 1
+            st.rerun()
+
+with next_col:
+    button_label = "完成" if st.session_state.current_index == len(QUESTIONS) - 1 else "下一题 ➡️"
+
+    if st.button(button_label):
         if len(selected_unique) == 0:
             st.warning("请先选择一个选项。")
         elif len(selected_unique) > 1:
@@ -335,8 +340,6 @@ with save_col:
                 comment=comment
             )
 
-            st.success("已保存。")
-
             if st.session_state.current_index < len(QUESTIONS) - 1:
                 st.session_state.current_index += 1
             else:
@@ -344,20 +347,6 @@ with save_col:
 
             st.rerun()
 
-with prev_col:
-    if st.button("⬅️ 上一题"):
-        st.session_state.finished = False
-        if st.session_state.current_index > 0:
-            st.session_state.current_index -= 1
-            st.rerun()
-
-with next_col:
-    if st.button("下一题 ➡️"):
-        if st.session_state.current_index < len(QUESTIONS) - 1:
-            st.session_state.current_index += 1
-            st.rerun()
-        else:
-            st.info("已经是最后一题。请点击“保存当前题”完成。")
 
 st.divider()
 st.subheader("Google Sheets 状态")

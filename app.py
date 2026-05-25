@@ -360,7 +360,7 @@ if "current_index" not in st.session_state:
 
 
 if st.session_state.finished:
-    st.success("所有题目已经完成。谢谢你的参与！")
+    st.success("所有题目已经完成。谢谢参与！")
     st.balloons()
 
     st.divider()

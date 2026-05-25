@@ -13,7 +13,7 @@ OPTIONS = [
     "A. 肥胖外观描述 obesity appearance",
     "B. 肥胖原因描述 obesity causes",
     "C. 肥胖发展描述 fatness development",
-    "D. 肥胖结果描述 obesity consequences"
+    "D. 肥胖影响描述（包含正面和负面） obesity consequences"
 ]
 
 S_COLUMNS = [f"S{i}" for i in range(1, 9)]

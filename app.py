@@ -18,10 +18,24 @@ OPTIONS = [
 
 S_COLUMNS = [f"S{i}" for i in range(1, 9)]
 
+RAW_HEADER = [
+    "coder_id",
+    "sentence_id",
+    "s_col",
+    "sentence",
+    "question",
+    "answer",
+    "comment",
+    "updated_at"
+]
+
 st.set_page_config(page_title="Study 3 Coding", layout="wide")
 st.title("Study 3 Coding Task")
 
 
+# -----------------------------
+# 1. Load local question file
+# -----------------------------
 @st.cache_data
 def load_questions_from_csv(file_path):
     df = pd.read_csv(file_path)
@@ -30,7 +44,7 @@ def load_questions_from_csv(file_path):
 
     for col in required_cols:
         if col not in df.columns:
-            st.error(f"Excel 文件缺少必要列：{col}")
+            st.error(f"CSV 文件缺少必要列：{col}")
             st.stop()
 
     pages = []
@@ -63,6 +77,9 @@ def load_questions_from_csv(file_path):
     return pages
 
 
+# -----------------------------
+# 2. Cached Google Sheet connection
+# -----------------------------
 @st.cache_resource
 def connect_sheet():
     scopes = [
@@ -80,73 +97,176 @@ def connect_sheet():
     return sheet
 
 
-def get_or_create_ws(sheet, name, rows=1000, cols=50):
+@st.cache_resource
+def get_cached_ws(name, rows=1000, cols=50):
+    """
+    Cache worksheet objects so that Streamlit does not fetch sheet metadata
+    every time the user clicks Next / Previous.
+    """
+    sheet = connect_sheet()
     try:
         return sheet.worksheet(name)
     except gspread.WorksheetNotFound:
-        return sheet.add_worksheet(title=name, rows=rows, cols=cols)
+        ws = sheet.add_worksheet(title=name, rows=rows, cols=cols)
+        ws.update([RAW_HEADER] if name == RAW_SHEET else [["sentence_id", "s_col", "question"]])
+        return ws
 
 
-def read_raw_data(raw_ws):
-    records = raw_ws.get_all_records()
+def ensure_raw_header(raw_ws):
+    """
+    Make sure raw_data has the correct header.
+    """
+    values = raw_ws.get_all_values()
 
-    required_cols = [
-        "coder_id",
-        "sentence_id",
-        "s_col",
-        "sentence",
-        "question",
-        "answer",
-        "comment",
-        "updated_at"
-    ]
+    if not values:
+        raw_ws.update([RAW_HEADER])
+        return
 
-    if not records:
-        return pd.DataFrame(columns=required_cols)
+    current_header = values[0]
 
-    df = pd.DataFrame(records)
+    if current_header != RAW_HEADER:
+        # Only overwrite header row, not the whole sheet.
+        raw_ws.update("A1:H1", [RAW_HEADER])
 
-    for col in required_cols:
+
+# -----------------------------
+# 3. Cached reading from raw_data
+# -----------------------------
+@st.cache_data(ttl=60)
+def read_raw_data_cached():
+    """
+    Read raw_data from Google Sheets.
+
+    ttl=60 means Streamlit will not repeatedly read Google Sheets within 60 seconds.
+    After saving, we clear this cache so the app can see the latest answers.
+    """
+    raw_ws = get_cached_ws(RAW_SHEET)
+    ensure_raw_header(raw_ws)
+
+    values = raw_ws.get_all_values()
+
+    if len(values) <= 1:
+        df = pd.DataFrame(columns=RAW_HEADER)
+        df["_row_num"] = []
+        return df
+
+    header = values[0]
+    rows = values[1:]
+
+    df = pd.DataFrame(rows, columns=header)
+
+    for col in RAW_HEADER:
         if col not in df.columns:
             df[col] = ""
 
-    df = df[required_cols]
+    df = df[RAW_HEADER]
     df = df.fillna("")
+
+    # Google Sheets row numbers start from 1.
+    # Data rows begin at row 2 because row 1 is the header.
+    df["_row_num"] = range(2, len(df) + 2)
 
     return df
 
 
-def write_raw_data(raw_ws, df):
-    raw_ws.clear()
+def clear_raw_cache():
+    read_raw_data_cached.clear()
 
-    header = [
-        "coder_id",
-        "sentence_id",
-        "s_col",
-        "sentence",
-        "question",
-        "answer",
-        "comment",
-        "updated_at"
+
+# -----------------------------
+# 4. Fast save: update only necessary rows
+# -----------------------------
+def save_page_responses_fast(
+    raw_ws,
+    df,
+    coder_id,
+    sentence_id,
+    sentence,
+    responses,
+    comment
+):
+    """
+    Faster than clearing and rewriting the whole raw_data sheet.
+
+    For each coder + sentence_id + s_col:
+    - if the row already exists: update that row only
+    - if the row does not exist: append a new row
+
+    This means going back and changing an answer WILL overwrite the old answer
+    for that coder + sentence + S item.
+    """
+    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    df = df.copy()
+
+    # Existing rows for the same coder and same sentence
+    existing = df[
+        (df["coder_id"].astype(str) == str(coder_id)) &
+        (df["sentence_id"].astype(str) == str(sentence_id))
     ]
 
-    if df.empty:
-        raw_ws.update([header])
-    else:
-        df = df.fillna("")
-        raw_ws.update(
-            [df.columns.tolist()] + df.astype(str).values.tolist()
-        )
+    updates = []
+    append_rows = []
+
+    for item in responses:
+        s_col = item["s_col"]
+
+        row_values = [
+            coder_id,
+            sentence_id,
+            s_col,
+            sentence,
+            item["question"],
+            item["answer"],
+            comment,
+            updated_at
+        ]
+
+        matched = existing[existing["s_col"].astype(str) == str(s_col)]
+
+        if not matched.empty:
+            row_num = int(matched.iloc[0]["_row_num"])
+            updates.append({
+                "range": f"A{row_num}:H{row_num}",
+                "values": [row_values]
+            })
+        else:
+            append_rows.append(row_values)
+
+    # Batch update existing rows in one API call
+    if updates:
+        raw_ws.batch_update(updates)
+
+    # Append all new rows in one API call
+    if append_rows:
+        raw_ws.append_rows(append_rows, value_input_option="USER_ENTERED")
+
+    # Important: make Streamlit read the newest saved data after this save
+    clear_raw_cache()
 
 
+# -----------------------------
+# 5. Kappa format: update manually, not every question
+# -----------------------------
 def update_kappa_format(kappa_ws, df):
+    """
+    Rebuild kappa_format from raw_data.
+
+    This can be slow for large data, so the app now only runs it when the user
+    clicks the 'Update kappa_format' button.
+    """
     kappa_ws.clear()
 
     if df.empty:
         kappa_ws.update([["sentence_id", "s_col", "question"]])
         return
 
+    df = df.copy()
     df = df.fillna("")
+
+    # Remove helper column if present
+    if "_row_num" in df.columns:
+        df = df.drop(columns=["_row_num"])
 
     wide = df.pivot_table(
         index=["sentence_id", "s_col", "question"],
@@ -164,59 +284,20 @@ def update_kappa_format(kappa_ws, df):
     )
 
 
-def save_page_responses(
-    raw_ws,
-    kappa_ws,
-    df,
-    coder_id,
-    sentence_id,
-    sentence,
-    responses,
-    comment
-):
-    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    if not df.empty:
-        mask = (
-            (df["coder_id"].astype(str) == str(coder_id)) &
-            (df["sentence_id"].astype(str) == str(sentence_id))
-        )
-        df = df[~mask]
-
-    new_rows = []
-
-    for item in responses:
-        new_rows.append({
-            "coder_id": coder_id,
-            "sentence_id": sentence_id,
-            "s_col": item["s_col"],
-            "sentence": sentence,
-            "question": item["question"],
-            "answer": item["answer"],
-            "comment": comment,
-            "updated_at": updated_at
-        })
-
-    df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
-    df = df.fillna("")
-    df = df.sort_values(["sentence_id", "s_col", "coder_id"])
-
-    write_raw_data(raw_ws, df)
-    update_kappa_format(kappa_ws, df)
-
-
+# -----------------------------
+# 6. App starts here
+# -----------------------------
 PAGES = load_questions_from_csv(DATA_PATH)
 
 if len(PAGES) == 0:
-    st.error("Excel 中没有可用题目。请检查 ID、sentence、S1-S8 是否有内容。")
+    st.error("CSV 中没有可用题目。请检查 ID、Sentence、S1-S8 是否有内容。")
     st.stop()
 
 
-sheet = connect_sheet()
-raw_ws = get_or_create_ws(sheet, RAW_SHEET)
-kappa_ws = get_or_create_ws(sheet, KAPPA_SHEET)
+raw_ws = get_cached_ws(RAW_SHEET)
+kappa_ws = get_cached_ws(KAPPA_SHEET)
 
-df = read_raw_data(raw_ws)
+df = read_raw_data_cached()
 
 
 coder = st.text_input(
@@ -234,7 +315,10 @@ if "finished" not in st.session_state:
     st.session_state.finished = False
 
 st.write(f"Current coder: {coder}")
-st.info("点击“下一题”会自动保存本页所有答案。下次输入同一个 coder ID，会自动回到你上次停止的位置。")
+st.info(
+    "点击“下一题”会自动保存本页所有答案。"
+    "下次输入同一个 coder ID，会自动回到你上次停止的位置。"
+)
 
 
 coder_df = df[df["coder_id"].astype(str) == coder]
@@ -251,6 +335,7 @@ st.progress(done / total)
 st.write(f"进度：{done}/{total}")
 
 
+# Reset position when coder changes
 if "current_coder" not in st.session_state or st.session_state.current_coder != coder:
     st.session_state.current_coder = coder
     st.session_state.finished = False
@@ -272,9 +357,17 @@ if "current_coder" not in st.session_state or st.session_state.current_coder != 
 if "current_index" not in st.session_state:
     st.session_state.current_index = 0
 
+
 if st.session_state.finished:
     st.success("所有题目已经完成。谢谢你的参与！")
     st.balloons()
+
+    st.divider()
+    if st.button("更新 kappa_format 表"):
+        latest_df = read_raw_data_cached()
+        update_kappa_format(kappa_ws, latest_df)
+        st.success("kappa_format 已更新。")
+
     st.stop()
 
 
@@ -304,9 +397,12 @@ existing_page_answers = df[
 ]
 
 existing_answer_dict = {}
+existing_comment = ""
 
 for _, row in existing_page_answers.iterrows():
     existing_answer_dict[str(row["s_col"])] = str(row["answer"])
+    if str(row.get("comment", "")).strip() != "":
+        existing_comment = str(row.get("comment", "")).strip()
 
 responses = []
 
@@ -344,21 +440,38 @@ for sub_q in sub_questions:
 
 comment = st.text_area(
     "本页备注（可选）：",
+    value=existing_comment,
     key=f"{coder}_{sentence_id}_comment"
 )
 
 
-prev_col, next_col = st.columns([1, 1])
+st.divider()
 
-with prev_col:
+nav_col1, nav_col2, nav_col3 = st.columns([1, 1, 1])
+
+with nav_col1:
     if st.button("⬅️ 上一题"):
         st.session_state.finished = False
         if st.session_state.current_index > 0:
             st.session_state.current_index -= 1
             st.rerun()
 
-with next_col:
-    button_label = "完成" if st.session_state.current_index == len(PAGES) - 1 else "下一题 ➡️"
+with nav_col2:
+    jump_to = st.number_input(
+        "跳转到第几题：",
+        min_value=1,
+        max_value=total,
+        value=idx + 1,
+        step=1
+    )
+
+    if st.button("跳转"):
+        st.session_state.current_index = int(jump_to) - 1
+        st.session_state.finished = False
+        st.rerun()
+
+with nav_col3:
+    button_label = "完成" if st.session_state.current_index == len(PAGES) - 1 else "保存并下一题 ➡️"
 
     if st.button(button_label):
         missing = [
@@ -370,9 +483,8 @@ with next_col:
         if len(missing) > 0:
             st.warning(f"请先完成这些问题：{', '.join(missing)}")
         else:
-            save_page_responses(
+            save_page_responses_fast(
                 raw_ws=raw_ws,
-                kappa_ws=kappa_ws,
                 df=df,
                 coder_id=coder,
                 sentence_id=sentence_id,
@@ -395,3 +507,8 @@ st.subheader("Google Sheets 状态")
 st.write("答案会自动保存到 Google Sheets。")
 st.write("raw_data = 原始长表，每一行是一个 coder 对一个 S 片段的判断。")
 st.write("kappa_format = 可用于计算 kappa 的宽表。")
+
+if st.button("手动更新 kappa_format 表"):
+    latest_df = read_raw_data_cached()
+    update_kappa_format(kappa_ws, latest_df)
+    st.success("kappa_format 已更新。")

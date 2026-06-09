@@ -10,11 +10,10 @@ KAPPA_SHEET = "kappa_format"
 DATA_PATH = "用于app数据.csv"
 
 OPTIONS = [
-    "A. 肥胖外观描述 obesity appearance",
+    "A. 肥胖外观描述 obesity appearance，包含对超重肥胖者的称谓",
     "B. 肥胖原因描述 obesity causes",
     "C. 肥胖发展描述 fatness development",
-    "D. 肥胖影响描述（包含正面和负面） obesity consequences",
-    "E. 对超重肥胖者的称谓 addressing overweight/obese people"
+    "D. 肥胖影响描述（包含正面和负面） obesity consequences"
 ]
 
 S_COLUMNS = [f"S{i}" for i in range(1, 9)]
